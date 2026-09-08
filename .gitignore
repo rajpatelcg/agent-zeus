@@ -1,0 +1,31 @@
+# Ignore environment files
+.env
+.env.dev
+.env.prod
+
+# Ignore test files
+test/
+
+# Ignore docs -> Documentation
+docs/
+
+# Features
+call_terminate.py
+idle_handler.py
+app\agents\postcall_agent\backup
+**/__pycache__/**
+logs
+test.py
+z.py
+z_mapping.py
+z_llm.py
+z_1.py
+test_email.py
+validation.py
+test_pg.py
+test_conv.py
+
+.venv
+.vscode
+sp_data
+azure_service_bus

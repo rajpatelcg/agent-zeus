@@ -1,0 +1,83 @@
+name: Build collections V2
+
+on:
+  push:
+    branches:
+      - main
+      - test-branch
+
+env:
+  ACR_NAME: collectionsgenericregistry
+  ACR_LOGIN_SERVER: collectionsgenericregistry.azurecr.io
+  IMAGE_NAME: collections-dev-image-od
+  RESOURCE_GROUP: DGEM-Collections-Generic-Dev
+  CONTAINERAPP_NAME: od-collections
+  CONTAINERAPPS_ENVIRONMENT: collection-orchestration-v3-env
+  ENV_LOCATION: centralindia
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # ✅ CREATE CONTAINER APPS ENVIRONMENT (FIRST TIME ONLY)
+      - name: Ensure Container Apps Environment Exists
+        run: |
+          if az containerapp env show \
+            --name "$CONTAINERAPPS_ENVIRONMENT" \
+            --resource-group "$RESOURCE_GROUP" > /dev/null 2>&1; then
+            echo "✅ Container Apps environment already exists"
+          else
+            echo "🚀 Creating Container Apps environment in Central India..."
+            az containerapp env create \
+              --name "$CONTAINERAPPS_ENVIRONMENT" \
+              --resource-group "$RESOURCE_GROUP" \
+              --location "$ENV_LOCATION"
+          fi
+
+      - name: Log in to Azure Container Registry
+        run: |
+          az acr login --name $ACR_NAME
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.run_number }} \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.run_number }}
+
+      # ✅ CREATE OR UPDATE CONTAINER APP
+      - name: Ensure Azure Container App Exists
+        run: |
+          if az containerapp show \
+            --name "$CONTAINERAPP_NAME" \
+            --resource-group "$RESOURCE_GROUP" > /dev/null 2>&1; then
+
+            echo "✅ Container App exists. Updating image..."
+            az containerapp update \
+              --name "$CONTAINERAPP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --image "$ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.run_number }}"
+
+          else
+            echo "🚀 Creating Container App in Central India..."
+            az containerapp create \
+              --name "$CONTAINERAPP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --environment "$CONTAINERAPPS_ENVIRONMENT" \
+              --image "$ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.run_number }}" \
+              --registry-server "$ACR_LOGIN_SERVER" \
+              --ingress external \
+              --target-port 8000
+          fi

@@ -1,0 +1,36 @@
+name: Call Azure Function
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  call-api:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call Azure Function API
+        env:
+          AZURECR_PASSWORD: ${{ secrets.AZURECR_PASSWORD }}
+          AZURECR_USERNAME: ${{ secrets.AZURECR_USERNAME }}
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+
+        run: |
+          echo "Calling Azure Function..."
+
+          payload=$(jq -n \
+            --arg password "$AZURECR_PASSWORD" \
+            --arg username "$AZURECR_USERNAME" \
+            --arg credentials "$AZURE_CREDENTIALS" \
+            '{
+              AZURECR_PASSWORD: $password,
+              AZURECR_USERNAME: $username,
+              AZURE_CREDENTIALS: $credentials
+            }')
+
+          curl -X POST \
+            "https://rrp-test-func-app.azurewebsites.net/api/AuthFunction" \
+            -H "Content-Type: application/json" \
+            -d "$payload"

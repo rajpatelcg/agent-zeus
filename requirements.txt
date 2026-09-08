@@ -1,0 +1,53 @@
+# Core Services
+pipecat-ai[azure,deepgram,elevenlabs,openai,runner,silero,webrtc]>=0.0.100,<0.108
+openai>=1.0.0
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# Telephony & Storage
+twilio>=9.0.0
+azure-storage-blob>=12.0.0
+azure-identity>=1.14.0
+azure-ai-contentsafety>=1.0.0
+azure-cognitiveservices-speech>=1.30.0
+azure-cosmos>=4.7.0
+anthropic>=0.104.1
+# Critical Safety Guards (Required for onnxruntime/VAD stability)
+protobuf>=5.20.0,<6.0.0
+onnxruntime>=1.16.0
+
+
+# Azure Monitor Telemetry
+azure-monitor-opentelemetry>=1.6.0
+opentelemetry-api>=1.28.0
+opentelemetry-sdk>=1.28.0
+
+# Analytics & Logic
+langchain>=0.1.0
+langchain-openai
+langchain-core
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+loguru>=0.7.0
+
+# Audio Utilities
+python-multipart
+websockets>=13.0.0
+scipy>=1.10.0
+numpy>=1.20.0
+aiohttp>=3.9.0
+aiofiles>=23.0.0
+
+#pandas
+pandas
+openpyxl
+
+timezonefinder 
+geopy 
+pytz
+pycountry-convert
+pycountry
+phonenumbers
+
+
+azure-servicebus
