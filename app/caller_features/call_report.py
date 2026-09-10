@@ -825,75 +825,6 @@ def process_completed_call(
         },
     }
 
-# Example 2: Indian Postal Code (With country hint for better accuracy)
-# print(get_currency_from_postal_code("110001", country_code="IN"))    
-
-# def split_actions_by_overall_confidence(
-#     actions: list[dict],
-#     confidence_score: float,
-#     confidence_reason: str,
-#     # min_confidence: float = 0.85,
-# ) -> tuple[list[dict], list[dict]]:
-#     if confidence_score is None :
-#         return [], [
-#             {
-#                 **action,
-#                 "validation_status": "blocked",
-#                 "validation_reason": "Blocked because overall confidence score is below threshold."
-#             }
-#             for action in actions
-#         ]
- 
-#     if not confidence_reason:
-#         return [], [
-#             {
-#                 **action,
-#                 "validation_status": "blocked",
-#                 "validation_reason": "Blocked because overall confidence reason is missing."
-#             }
-#             for action in actions
-#         ]
- 
-#     matches = re.findall(
-#         r"action item ids?\s*(?:is|are|:)?\s*([\d,\s]+)",
-#         confidence_reason.lower()
-#     )
- 
-#     action_numbers = set()
- 
-#     for match in matches:
-#         for num in re.findall(r"\d+", match):
-#             action_numbers.add(int(num))
- 
-#     allowed_action_ids = {
-#         f"ACT{num:03d}" for num in action_numbers
-#     }
- 
-#     allowed_actions = []
-#     blocked_actions = []
- 
-#     for action in actions:
-#         action_id = action.get("action_id")
- 
-#         if action_id in allowed_action_ids:
-#             allowed_actions.append({
-#                 **action,
-#                 "validation_status": "allowed",
-#                 "validation_reason": "Allowed because action ID was referenced in overall confidence reason."
-#             })
-#         else:
-#             blocked_actions.append({
-#                 **action,
-#                 "validation_status": "blocked",
-#                 "validation_reason": "Blocked because action ID was not referenced in overall confidence reason."
-#             })
- 
-#     return allowed_actions, blocked_actions
-################################# contacts ########################################
-
-
-
-
 
 def get_contact_records(
     org_id,
@@ -1546,36 +1477,6 @@ def split_actions_by_overall_confidence(
  
     return allowed_actions, blocked_actions
 
-
-
-# def convert_utc_to_local(timestamp_str, timezone_str):
-#     """
-#     Convert UTC timestamp to target timezone.
-#     Expected format: 2026-07-11T10:30:00Z
-#     """
-#     if not timestamp_str:
-#         return ""
-
-#     try:
-#         utc_dt = datetime.fromisoformat(
-#             timestamp_str.replace("Z", "+00:00")
-#         )
-
-#         target_tz = pytz.timezone(timezone_str)
-
-#         local_dt = utc_dt.astimezone(target_tz)
-
-#         return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z%z")
-
-#     except Exception as e:
-#         print(f"Time conversion error: {e}")
-#         return timestamp_str
-
-
-# Example postal code and country
-# postal_code = call_data["postal_code"] or "10001"
-# country_name = call_data["country"] or"United States"
-
 postal_code ="10001"
 country_name="United States"
 country_code="US"
@@ -1588,22 +1489,6 @@ timezone_str = get_timezone_by_postal_code(
     country_name
 )
 
-# if timezone_str:
-#     # Convert start time
-#     start_time = twilio_metadata.get('start_time')
-#     end_time = twilio_metadata.get('end_time')
-
-#     localized_start_time = convert_utc_to_local(
-#         start_time,
-#         timezone_str
-#     )
-
-#     localized_end_time = convert_utc_to_local(
-#         end_time,
-#         timezone_str
-#     )
-
-############################################33
 def notify_agent_orchestration_service(call_id):
     """
     Notify orchestration service that this agent has completed its current call.
@@ -1735,21 +1620,6 @@ async def report_call_result(call_sid: str, user_data: dict, transcript: list, c
         document["call_data"]["call_start_at"] = twilio_metadata.get('start_time') or document["call_data"].get("call_start_at") or ""
         document["call_data"]["call_end_at"] = twilio_metadata.get('end_time') or document["call_data"].get("call_end_at") or ""
        
-        ##local time based on postal code and country 
-        # if timezone_str:
-        #     # Convert start time
-        #     start_time = twilio_metadata.get('start_time')
-        #     end_time = twilio_metadata.get('end_time')
-
-        #     localized_start_time = convert_utc_to_local(
-        #      start_time,
-        #     timezone_str
-        #     )
-
-        #     localized_end_time = convert_utc_to_local(
-        #           end_time,
-        #       timezone_str
-        #               )
         document.update({
             "id": user_data.get("case_id", call_sid),
             "user_id": user_data.get("customer_number") or user_data.get("customer_id", call_sid),
@@ -1774,16 +1644,6 @@ async def report_call_result(call_sid: str, user_data: dict, transcript: list, c
             document['actions'] = []
             print(f"[Actions] No actions extracted.{document['actions']}")
  
- 
- 
-        #validate actions based on overall confidence score and reason
-        # allowed_actions, blocked_actions = split_actions_by_overall_confidence(
-        #     actions=document.get("actions", []),
-        #     confidence_score=document.get("confidence_score", 0),
-        #     confidence_reason=document.get("confidence_reason", "")
-        # )
-        # print(f"[Validation] Allowed Actions: {allowed_actions}")
-        # print(f"[Validation] Blocked Actions: {blocked_actions}")
         
         allowed_actions = [action for action in document.get("actions") if action.get("confidence_score", 0) > 0.85] or []
         blocked_actions  = [action for action in document.get("actions") if action.get("confidence_score", 0) <= 0.85] or []
@@ -2023,7 +1883,9 @@ async def report_call_result(call_sid: str, user_data: dict, transcript: list, c
 
         if email_address:
             email_handler.send_email([email_address], subject=email_subject, html_body=email_content, cc=cc_list) 
-#########################################################################################################
+
+        
+    
         # Determine extension connection status based on payload and transcript analysis
         # If an extension was supplied, verify if it was accepted or if IVR reported an invalid entry
         extension_val = user_data.get("extension") or document.get("extension") or user_data.get("phone_extension")
@@ -2174,19 +2036,6 @@ async def report_call_result(call_sid: str, user_data: dict, transcript: list, c
             except Exception as e:
                 print(f"[Webhook] Failed to send report: {e}")
                 fire_and_forget_log(user_data, "Send Call Records to Post‑Call Handler", "callhandler_e006", False, "Call records could not be delivered to post‑call handler due to pipeline failure")
-        # else:
-        #     verification_payload=final_payload.copy()
-        #     verification_payload.pop("token_usage", None)
-        #     verification_payload.pop("realtime_usage", None)
-        #     verification_payload.pop("telemetry_summary",None)
-        #     try:
-        #         await save_to_humanevalauation(verification_payload)
-        #     except Exception as e:
-        #         print(f"Evalation [Cosmos] Failed to save result: {e}")    
-        # # 6. Database Persistence
-        
-        # Sharepoint actions
-        
         
         
         try:
@@ -2201,104 +2050,6 @@ async def report_call_result(call_sid: str, user_data: dict, transcript: list, c
  
 if __name__=="__main__":
    
-    # Sample inputs
-    # call_sid = "CA1234567890abcdef"
- 
-    # user_data = {
-    #     "user_id": "U1001",
-    #     "name": "John Doe",
-    #     "phone": "+919876543210",
-    #     "email": "john.doe@example.com",
-    #     "invoice_id": ["INV-2020","INV-2021"],
-    #     "case_id": "CASE123",
-    # }
-    # transcript = [
-    #     {"speaker": "agent", "text": "Hello, how can I help you today?"},
-    #     {"speaker": "user", "text": "I need help with my order."},
-    #     {"speaker": "agent", "text": "Sure, please provide your order ID."},
-    #     {}
-    # ]
- 
-    # call_status = True  # True = success, False = failed
- 
-    # recording_info = {
-    #     "recording_url": "https://example.com/recordings/call123.mp3",
-    #     "duration_seconds": 180
-    # }
- 
-    # failure_message = None  # since call is successful
- 
-    # realtime_usage = {
-    #     "duration_seconds": 180,
-    #     "cost_usd": 0.25,
-    #     "api_calls": 12
-    # }
- 
-    # # Call the function
-   
-    # res=asyncio.run(report_call_result(
-    #     call_sid=call_sid,
-    #     user_data=user_data,
-    #     transcript=transcript,
-    #     call_status=call_status,
-    #     recording_info=recording_info,
-    # ))
-    # print(res)
-    # email_address = user_data.get("email", " ")
-
-    # invoice_no = user_data.get("invoice_id", " ")
-    # print(get_rpa_excel_df( invoice_no,email_address, multiple_invoices = True, organization_id = "OD", bill_to = "BT"))
-    # print(send_to_rpa_sharepoint(invoice_no,email_address, multiple_invoices = True, organization_id = "OD", bill_to = "BT"))
-    # res=get_call_results(org_id="ODP",customer_number="12345",bill_to="BT",follow_up_date="call_2",next_action="Follow up call",result_description="Successful call",result_code="200",result_timestamp="2023-10-10T10:00:00Z")
-    # print(res)
-    # sepecial="will be able to do partial payment of 50%"
-    # colector_full_name="LISA"
-    # note1="the summary"
-    # orgid="ODP"
-    # BILL="bt"
-    # print(get_special_notes(special_notes=sepecial,org_id=orgid,bill_to=BILL ,note=note1,note_entered_by=colector_full_name,special_instruction="need to inform the supervisor",customer_number="12345"))
-    # print(res)
-#     contact_excel_path = get_contact_records(
-#     org_id="OD",
-#     customer_number="CUST1001",
-#     bill_to="BT1001",
-#     contact_name_1="John Doe",
-#     contact_name_2="Accounts Payable",
-#     email="john.doe@example.com",
-#     phone_country="USA",
-#     phone="2125551234",
-#     cell_country="USA",
-#     cell_phone="9175556789",
-#     other_phone_country="USA",
-#     other_phone="6465559999",
-#     fax_country="USA",
-#     fax="2125550000",
-#     preferred_language="eng",
-#     contact_sequence="1"
-#    )
-
-#     print(contact_excel_path)
-
-    # print(get_call_results(org_id="ODP",customer_number="12345",bill_to="BT",follow_up_date="2023-10-10",next_action="Follow up call",result_description="Successful call",result_code="200",result_timestamp="2023-10-10T10:00:00Z"))
-    # # print(send_npr(org_id="ODP",customer_number="12345",bill_to="BT",invoice_id="INV-2020",npr_code="NPR001"))
-    #print(send_to_nrp_sharepoint(r"C:\Users\merwthom\AppData\Local\Temp\tmptf2qqzxy.xlsx"))
-    # def get_sharepoint_list():
-    #    items = list_sharepoint_folder_contents(
-    #     "Accounts Receivable Collections/Agentic for Collections/dev/outbound"
-    #    )
-
-    #    if not items:
-    #       return {"items": []}
-
-    #    for item in items:
-    #       item_type = "Folder" if "folder" in item else "File"
-    #       print(f"{item_type}: {item['name']}")
-
-    #    return {"items": items}
-
-    # res=get_sharepoint_list()
-    # for r in res.get("items", []):
-    #     print(r)
     successful_email = get_post_call_email(
         customer_name="John Smith",
         phone_number="+1 555-123-4567",
