@@ -21,6 +21,10 @@ from app.config.src import (
     auth_token
 )
 from twilio.rest import Client
+from app.agents.precall_agent.prompt_template_routes import (
+    router as prompt_template_router,
+)
+
 # from azure_service_bus.worker import run_agentic_consumer
 
 # @asynccontextmanager
@@ -140,7 +144,11 @@ app.add_middleware(
 
 # Include the API router for Twilio webhook paths (/api/, /api/ws, /api/status-callback, /api/call)
 app.include_router(api_router, prefix=f"/{AGENT_ID}/api")
+app.include_router(
 
+prompt_template_router
+
+)
 # Root-level alias so the orchestration layer can call /call directly (no prefix needed)
 @app.post(f"/{AGENT_ID}/call")
 async def call_root(request: Dict[str, Any]):

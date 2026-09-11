@@ -12,6 +12,108 @@ from dotenv import load_dotenv
 from typing import Optional
 load_dotenv()
 
+# def get_post_call_one_email_text(
+#     ap_name: str,
+#     phone_number: str,
+#     past_due_balance: float,
+#     document_types = [], # invoice_copy, soa, credit_memo
+#     sender_name: str = "",
+#     call_summary:str = None,
+#     call_status = True
+# ) -> str:
+#     """
+#     Generate a post call one email.
+
+#     Args:
+#         ap_name: Accounts Payable contact name.
+#         phone_number: Dialed phone number.
+#         past_due_balance: Outstanding balance.
+#         call_summary: Summary of the call attempt/discussion.
+#         include_invoice_copies: Whether invoice copies should be sent.
+#         include_statement: Whether statement of account should be sent.
+#         statement_email: Sender email for statements.
+#         sender_name: Signature name.
+
+#     Returns:
+#         Formatted email body.
+#     """
+    
+#     if call_status:
+#         opening_section = (
+#             f"I reached you at {phone_number} to discuss the status of the "
+#             "outstanding balance on your account."
+#         )
+#     else:
+#         opening_section = (
+#             f"I attempted to reach you at {phone_number} to discuss the status "
+#             "of the outstanding balance on your account, but unfortunately, "
+#             "we were unable to connect."
+#         )
+    
+#     document_type_to_display_map = {
+#         "invoice_copy": "invoice copy",
+#         "credit_memo": "credit memo",
+#         "soa": "statement of account",
+#     }
+
+#     requested_docs = [
+#         document_type_to_display_map[doc]
+#         for doc in document_types
+#         if doc in document_type_to_display_map
+#     ]
+
+#     document_lines = []
+
+#     if requested_docs:
+#         if len(requested_docs) == 1:
+#             docs_text = requested_docs[0]
+#         elif len(requested_docs) == 2:
+#             docs_text = " and ".join(requested_docs)
+#         else:
+#             docs_text = ", ".join(requested_docs[:-1]) + f", and {requested_docs[-1]}"
+
+#         document_lines.append(
+#             f"As requested, we will provide {docs_text}, along the day from the emails below:"
+#         )
+
+#     if "invoice_copy" in document_types:
+#         document_lines.append(
+#             "• Invoice copies will be received from noreply@odpbusiness.com"
+#         )
+
+#     if "credit_memo" in document_types:
+#         document_lines.append(
+#             "• Credit memos will be received from noreply@odpbusiness.com"
+#         )
+
+#     if "soa" in document_types:
+#         document_lines.append(
+#             f"• Statement of account will be received from notification@officedepot.com"
+#         )
+
+#     document_section = "\n"+ "\n".join(document_lines)
+
+
+#     email_body = f"""
+# Dear {ap_name},
+
+# I hope this message finds you well.
+
+# {opening_section}
+
+# This is to let you know that there is a past due balance on your account of ${past_due_balance:,.2f}. I kindly ask you to review this and provide payment details (Check #/ACH, total amount, and payment date) at your earliest convenience. 
+# {document_section}
+
+# If you have any questions or require further assistance, please do not hesitate to reach out to me directly.
+
+# Thank you for your prompt attention to this matter.
+
+# Kind regards,
+
+# {sender_name}
+# """.strip()
+
+#     return email_body
 def get_post_call_email(
     customer_name: str,
     phone_number: str,
@@ -26,6 +128,7 @@ def get_post_call_email(
     action_items: Optional[list] = None,
     document_types: Optional[list] = None,
     sender_name: str = "",
+    customer_due_date: str = "",
 ) -> str:
     """
     Generate an HTML post-call email.
@@ -55,7 +158,7 @@ def get_post_call_email(
     dispute_details = escape(str(dispute_details or "None"))
     additional_details = escape(str(additional_details or "None"))
     call_summary = escape(str(call_summary or ""))
-
+    customer_due_date = escape(str(customer_due_date or "N/A"))
     # Format outstanding balance
     try:
         balance = float(
@@ -141,85 +244,95 @@ def get_post_call_email(
         </p>
         """
 
-    # Build action items table
-    action_section = ""
 
-    if action_items:
-        rows = ""
-
-        for item in action_items:
-            if isinstance(item, dict):
-                action = escape(str(item.get("action", "")))
-                owner = escape(str(item.get("owner", "")))
-                due_date = escape(str(item.get("due_date", "")))
-            else:
-                action = escape(str(item))
-                owner = ""
-                due_date = ""
-
-            rows += f"""
-            <tr>
-                <td style="border:1px solid #ddd;padding:8px;">
-                    {action}
-                </td>
-                <td style="border:1px solid #ddd;padding:8px;">
-                    {owner}
-                </td>
-                <td style="border:1px solid #ddd;padding:8px;">
-                    {due_date}
-                </td>
-            </tr>
-            """
-
-        action_section = f"""
-        <h3>Agreed Actions</h3>
-
-        <table
-            style="
-                border-collapse:collapse;
-                width:100%;
-                margin-bottom:16px;
-            "
-        >
-            <thead>
-                <tr style="background-color:#f2f2f2;">
-                    <th
-                        style="
-                            border:1px solid #ddd;
-                            padding:8px;
-                            text-align:left;
-                        "
-                    >
-                        Action
-                    </th>
-
-                    <th
-                        style="
-                            border:1px solid #ddd;
-                            padding:8px;
-                            text-align:left;
-                        "
-                    >
-                        Owner
-                    </th>
-
-                    <th
-                        style="
-                            border:1px solid #ddd;
-                            padding:8px;
-                            text-align:left;
-                        "
-                    >
-                        Due Date
-                    </th>
-                </tr>
-            </thead>
-
-            <tbody>
-                {rows}
-            </tbody>
-        </table>
+        # Customer-facing next step
+    action_section = f"""
+        <h3>Your Next Step</h3>
+        <p style="white-space: pre-line;">
+            {action_items[0] if action_items else "Please provide the payment details, including check or ACH reference, total payment amount, and payment date."}
+        </p>
+        <p><strong>Agreed payment date:</strong> {customer_due_date}</p>
         """
+
+    # Build action items table
+    # action_section = ""
+
+    # if action_items:
+    #     rows = ""
+
+    #     for item in action_items:
+    #         if isinstance(item, dict):
+    #             action = escape(str(item.get("action", "")))
+    #             owner = escape(str(item.get("owner", "")))
+    #             due_date = escape(str(item.get("due_date", "")))
+    #         else:
+    #             action = escape(str(item))
+    #             owner = ""
+    #             due_date = ""
+
+    #         rows += f"""
+    #         <tr>
+    #             <td style="border:1px solid #ddd;padding:8px;">
+    #                 {action}
+    #             </td>
+    #             <td style="border:1px solid #ddd;padding:8px;">
+    #                 {owner}
+    #             </td>
+    #             <td style="border:1px solid #ddd;padding:8px;">
+    #                 {due_date}
+    #             </td>
+    #         </tr>
+    #         """
+
+    #     action_section = f"""
+    #     <h3>Agreed Actions</h3>
+
+    #     <table
+    #         style="
+    #             border-collapse:collapse;
+    #             width:100%;
+    #             margin-bottom:16px;
+    #         "
+    #     >
+    #         <thead>
+    #             <tr style="background-color:#f2f2f2;">
+    #                 <th
+    #                     style="
+    #                         border:1px solid #ddd;
+    #                         padding:8px;
+    #                         text-align:left;
+    #                     "
+    #                 >
+    #                     Action
+    #                 </th>
+
+    #                 <th
+    #                     style="
+    #                         border:1px solid #ddd;
+    #                         padding:8px;
+    #                         text-align:left;
+    #                     "
+    #                 >
+    #                     Owner
+    #                 </th>
+
+    #                 <th
+    #                     style="
+    #                         border:1px solid #ddd;
+    #                         padding:8px;
+    #                         text-align:left;
+    #                     "
+    #                 >
+    #                     Due Date
+    #                 </th>
+    #             </tr>
+    #         </thead>
+
+    #         <tbody>
+    #             {rows}
+    #         </tbody>
+    #     </table>
+    #     """
 
     # Document delivery configuration
     document_config = {
@@ -388,6 +501,566 @@ def get_post_call_email(
     """
 
     return email_body.strip()
+
+#######################################
+from html import escape
+from typing import Optional
+
+
+def get_post_call_email_two(
+    customer_name: str,
+    phone_number: str,
+    outstanding_balance: float,
+    call_status: bool = True,
+    call_date: str = "",
+    aging_details: str = "",
+    customer_feedback: str = "",
+    dispute_details: str = "",
+    additional_details: str = "",
+    call_summary: str = "",
+    action_items: Optional[list] = None,
+    document_types: Optional[list] = None,
+    sender_name: str = "",
+    account_number: str = "",
+    
+   
+) -> str:
+    """
+    Generate one HTML email for all post-call scenarios.
+
+    Scenarios:
+        call_status=True:
+            Customer was reached.
+
+        call_status=False and attempt_number=1:
+            Customer was not reached on the first attempt.
+
+        call_status=False and attempt_number>=2:
+            Second or later follow-up email.
+
+    Supported document types:
+        invoice_copy
+        credit_memo
+        soa
+    """
+
+    action_items = action_items or []
+    document_types = document_types or []
+
+    # Normalize document types
+    document_types = {
+        str(document_type).strip().lower()
+        for document_type in document_types
+        if document_type
+    }
+
+    # Escape dynamic values for safe HTML output
+    customer_name = escape(
+        str(customer_name or "Customer")
+    )
+    phone_number = escape(
+        str(phone_number or "the provided number")
+    )
+    account_number = escape(
+        str(account_number or "")
+    )
+    sender_name = escape(
+        str(sender_name or "")
+    )
+    call_date = escape(
+        str(call_date or "")
+    )
+    aging_details = escape(
+        str(aging_details or "")
+    )
+    customer_feedback = escape(
+        str(customer_feedback or "")
+    )
+    dispute_details = escape(
+        str(dispute_details or "")
+    )
+    additional_details = escape(
+        str(additional_details or "")
+    )
+    call_summary = escape(
+        str(call_summary or "")
+    )
+
+    # try:
+    #     attempt_number = int(attempt_number or 1)
+    # except (ValueError, TypeError):
+    #     attempt_number = 1
+
+    # Format outstanding balance
+    try:
+        balance = float(
+            str(outstanding_balance or 0)
+            .replace("$", "")
+            .replace(",", "")
+            .strip()
+        )
+    except (ValueError, TypeError):
+        balance = 0.0
+
+    formatted_balance = f"${balance:,.2f}"
+
+    # ==========================================================
+    # Opening section
+    # ==========================================================
+
+    if call_status:
+      
+
+   
+        account_text = (
+            f" on account <strong>#{account_number}</strong>"
+            if account_number
+            else " on your account"
+        )
+
+        opening_section = f"""
+        <p>
+            I am following up regarding the outstanding balance of
+            <strong>{formatted_balance}</strong>{account_text}.
+        </p>
+
+        <p>
+            It is important that we receive an update on the status
+            of this payment. Kindly provide a resolution or an
+            estimated timeframe for when the outstanding balance
+            will be fully settled.
+        </p>
+
+        <p>
+            Please confirm receipt of this email at your earliest
+            convenience.
+        </p>
+        """
+
+    else:
+        opening_section = f"""
+        <p>
+            I attempted to reach you at {phone_number} to discuss the
+            outstanding balance on your account, but unfortunately,
+            we were unable to connect.
+        </p>
+        """
+
+    # ==========================================================
+    # Account details
+    # ==========================================================
+
+    details = []
+
+    if account_number:
+        details.append(
+            "<li>"
+            "<strong>Account number:</strong> "
+            f"{account_number}"
+            "</li>"
+        )
+
+    if call_date:
+        details.append(
+            "<li>"
+            "<strong>Call date:</strong> "
+            f"{call_date}"
+            "</li>"
+        )
+
+    details.append(
+        "<li>"
+        "<strong>Outstanding balance:</strong> "
+        f"{formatted_balance}"
+        "</li>"
+    )
+
+    if aging_details:
+        details.append(
+            "<li>"
+            "<strong>Aging details:</strong> "
+            f"{aging_details}"
+            "</li>"
+        )
+
+    if call_status:
+        if customer_feedback:
+            details.append(
+                "<li>"
+                "<strong>Customer feedback:</strong> "
+                f"{customer_feedback}"
+                "</li>"
+            )
+
+        if dispute_details:
+            details.append(
+                "<li>"
+                "<strong>Disputes or issues:</strong> "
+                f"{dispute_details}"
+                "</li>"
+            )
+
+        if additional_details:
+            details.append(
+                "<li>"
+                "<strong>Risks or potential delays:</strong> "
+                f"{additional_details}"
+                "</li>"
+            )
+
+    details_section = f"""
+    <h3 style="color:#333333;">Account Details</h3>
+
+    <ul>
+        {''.join(details)}
+    </ul>
+    """
+
+    # ==========================================================
+    # Call summary
+    # ==========================================================
+
+    summary_section = ""
+
+    if call_summary:
+        summary_section = f"""
+        <h3 style="color:#333333;">Call Summary</h3>
+
+        <p style="white-space:pre-line;">
+            {call_summary}
+        </p>
+        """
+
+    # ==========================================================
+    # Action items
+    # ==========================================================
+
+    action_section = ""
+
+    if action_items:
+        action_rows = ""
+
+        for item in action_items:
+            if isinstance(item, dict):
+                action = escape(
+                    str(item.get("action") or "")
+                )
+                owner = escape(
+                    str(item.get("owner") or "")
+                )
+                due_date = escape(
+                    str(item.get("due_date") or "")
+                )
+            else:
+                action = escape(str(item or ""))
+                owner = ""
+                due_date = ""
+
+            action_rows += f"""
+            <tr>
+                <td style="
+                    border:1px solid #dddddd;
+                    padding:8px;
+                ">
+                    {action}
+                </td>
+
+                <td style="
+                    border:1px solid #dddddd;
+                    padding:8px;
+                ">
+                    {owner}
+                </td>
+
+                <td style="
+                    border:1px solid #dddddd;
+                    padding:8px;
+                ">
+                    {due_date}
+                </td>
+            </tr>
+            """
+
+        action_section = f"""
+        <h3 style="color:#333333;">Agreed Actions</h3>
+
+        <table style="
+            border-collapse:collapse;
+            width:100%;
+            margin-bottom:16px;
+        ">
+            <thead>
+                <tr style="background-color:#f2f2f2;">
+                    <th style="
+                        border:1px solid #dddddd;
+                        padding:8px;
+                        text-align:left;
+                    ">
+                        Action
+                    </th>
+
+                    <th style="
+                        border:1px solid #dddddd;
+                        padding:8px;
+                        text-align:left;
+                    ">
+                        Owner
+                    </th>
+
+                    <th style="
+                        border:1px solid #dddddd;
+                        padding:8px;
+                        text-align:left;
+                    ">
+                        Due Date
+                    </th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {action_rows}
+            </tbody>
+        </table>
+        """
+
+    # ==========================================================
+    # Document delivery
+    # ==========================================================
+
+    document_config = {
+        "invoice_copy": {
+            "name": "Invoice Copy",
+            "email": "noreply@odpbusiness.com",
+        },
+        "credit_memo": {
+            "name": "Credit Memo",
+            "email": "noreply@odpbusiness.com",
+        },
+        "soa": {
+            "name": "Statement of Account",
+            "email": "notification@officedepot.com",
+        },
+    }
+
+    document_rows = ""
+
+    for document_type in [
+        "invoice_copy",
+        "credit_memo",
+        "soa",
+    ]:
+        if document_type not in document_types:
+            continue
+
+        document_name = document_config[
+            document_type
+        ]["name"]
+
+        document_email = document_config[
+            document_type
+        ]["email"]
+
+        document_rows += f"""
+        <li style="margin-bottom:8px;">
+            The requested <strong>{document_name}</strong>
+            will be sent separately from
+            {document_email}
+                {document_email}
+            </a>
+            within 24 hours.
+        </li>
+        """
+
+    document_section = ""
+
+    if document_rows:
+        document_section = f"""
+        <h3 style="color:#333333;">
+            Document Delivery
+        </h3>
+
+        <p>
+            The following requested document or documents will be
+            delivered separately:
+        </p>
+
+        <ul>
+            {document_rows}
+        </ul>
+        """
+
+    # ==========================================================
+    # Payment request
+    # ==========================================================
+
+    if call_status:
+        # payment_section = """
+        # <p>
+        #     If the payment details have not already been provided,
+        #     please share the check or ACH reference, total payment
+        #     amount, payment date, and remittance information.
+        # </p>
+        # """
+
+        # elif attempt_number >= 2:
+        payment_section = """
+        <p>
+            Once the payment has been processed, please provide the
+            payment details, including the check or ACH reference,
+            payment amount, payment date, and remittance information
+            so that we can update the account records.
+        </p>
+        """
+
+    else:
+        payment_section = """
+        <p>
+            Please review the outstanding balance and provide the
+            payment status. Once payment has been processed, please
+            share the check or ACH reference, payment amount, payment
+            date, and remittance information.
+        </p>
+        """
+
+    # ==========================================================
+    # Next steps
+    # ==========================================================
+
+    if call_status:
+        # next_steps_section = """
+        # <h3 style="color:#333333;">Next Steps</h3>
+
+        # <ul>
+        #     <li>Complete the agreed action items.</li>
+        #     <li>Provide payment details when available.</li>
+        #     <li>Schedule another review call if required.</li>
+        # </ul>
+        # """
+
+       # elif attempt_number >= 2:
+        next_steps_section = """
+        <h3 style="color:#333333;">Required Next Steps</h3>
+
+        <ul>
+            <li>
+                Confirm receipt of this email.
+            </li>
+            <li>
+                Provide the current payment status.
+            </li>
+            <li>
+                Provide a resolution date or estimated payment date.
+            </li>
+            <li>
+                Contact us if an invoice requires clarification.
+            </li>
+        </ul>
+        """
+    else:
+        next_steps_section = """
+        <h3 style="color:#333333;">Next Steps</h3>
+
+        <ul>
+            <li>Review the outstanding balance.</li>
+            <li>Provide the payment status and payment details.</li>
+            <li>
+                Contact us if an invoice requires clarification.
+            </li>
+        </ul>
+        """
+
+    # ==========================================================
+    # Closing section
+    # ==========================================================
+
+    if not call_status :
+        closing_section = """
+        <p>
+            Your prompt attention to this matter would be greatly
+            appreciated. Please confirm receipt of this email at your
+            earliest convenience.
+        </p>
+        """
+    else:
+        closing_section = """
+        <p>
+            If you have any questions or require further assistance,
+            please do not hesitate to contact us.
+        </p>
+
+        <p>
+            Thank you for your prompt attention to this matter.
+        </p>
+        """
+
+    # ==========================================================
+    # Complete HTML email
+    # ==========================================================
+
+    email_body = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        >
+
+        <title>Post-Call Email</title>
+    </head>
+
+    <body style="
+        margin:0;
+        padding:20px;
+        background-color:#ffffff;
+        font-family:Arial, Helvetica, sans-serif;
+        font-size:14px;
+        line-height:1.5;
+        color:#000000;
+    ">
+        <div style="
+            max-width:750px;
+            margin:0 auto;
+            background-color:#ffffff;
+        ">
+            <p>Dear {customer_name},</p>
+
+            <p>I hope this message finds you well.</p>
+
+            {opening_section}
+
+            {details_section}
+
+            {summary_section}
+
+            {payment_section}
+
+            {action_section}
+
+            {document_section}
+
+            {next_steps_section}
+
+            {closing_section}
+
+            <p>
+                Kind regards,
+                <br><br>
+                {sender_name}
+                <br>
+                <a href="mailto:ABBillingSupport@odpbusiness.com">
+                    ABBillingSupport@odpbusiness.com
+                </a>
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    return email_body.strip()
+
 ################################################3    
 def get_post_call_one_email(
     ap_name: str,
@@ -593,7 +1266,8 @@ def get_post_call_summary_email(
     email_body = f"""
 <html>
 <body style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #000000;">
-    <p>Hi Team,</p>
+    
+    <p>Hi {customer_name},</p>
 
     <p>Thank you for taking my call today. Below is a summary of the key points discussed:</p>
 
@@ -771,7 +1445,7 @@ def get_post_call_two_email(
 
 class LogicAppEmailHandler:
     def __init__(self):
-        self.logic_app_url = os.getenv("LOGIC_APP_URL")
+        self.logic_app_url = os.getenv("LOGIC_APP_URL","https://lap-oddv-eus2-collectionsapp.azurewebsites.net:443/api/rpa_agent_zeus/triggers/When_an_HTTP_request_is_received/invoke?api-version=2022-05-01&sp=%2Ftriggers%2FWhen_an_HTTP_request_is_received%2Frun&sv=1.0&sig=sASgnooyUZ14hf0FijmtHwYNGbKFFC0IOYq6amtUZZo")
 
         if not self.logic_app_url:
             raise ValueError(
@@ -824,8 +1498,12 @@ class LogicAppEmailHandler:
                 timeout=30,
             )
 
-            response.raise_for_status()
-            
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as ex:
+                logger.exception("Failed to submit Logic App email request: %s", str(ex))
+                raise
+
             print(f"Logic App email request submitted successfully. Status={ response.status_code}",
                )
 

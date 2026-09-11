@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-import pandas as pd
+from azure.core import MatchConditions
 from azure.cosmos import CosmosClient, exceptions
+import pandas as pd
 
 from app.caller_features.sharepoint import upload_file_to_sharepoint
 from app.config.src import COSMOS_ENDPOINT,COSMOS_KEY 
@@ -39,6 +40,11 @@ RPA_BUSINESS_TIMEZONE = "Asia/Kolkata"
 
 SHAREPOINT_PRODUCTION_FOLDER = "Accounts Receivable Collections/Agentic for Collections/dev/outbound"
 
+# Invoices (document_copy) go to their own paths, split by single vs multiple invoices.
+DEFAULT_OUTPUT_FOLDERS = {
+    "invoice_copy_single": f"{SHAREPOINT_PRODUCTION_FOLDER}/Invoices/SingleInvoice",
+    "invoice_copy_multiple": f"{SHAREPOINT_PRODUCTION_FOLDER}/Invoices/MultiInvoice",
+}
 
 
 RPA_RETENTION_SECONDS = int(
@@ -71,9 +77,6 @@ CSV_RECORD_TYPES = {
     "dispute",
     "call_result",
     "soa",
-}
-
-EXCEL_RECORD_TYPES = {
     "special_notes",
     "document_copy",
 }
@@ -88,6 +91,8 @@ FILE_PREFIXES = {
     "soa": "soa",
     "special_notes": "special_notes",
     "document_copy": "document_copy",
+    "invoice_copy_single": "invoice_copy_single",
+    "invoice_copy_multiple": "invoice_copy_multiple",
 }
 
 
@@ -149,7 +154,7 @@ def enqueue_rpa_record(
       the same Cosmos document ID and cannot be inserted twice.
     """
 
-    if record_type not in CSV_RECORD_TYPES | EXCEL_RECORD_TYPES:
+    if record_type not in CSV_RECORD_TYPES:
         raise ValueError(
             f"Unsupported RPA record type: {record_type}"
         )
@@ -216,6 +221,32 @@ def enqueue_rpa_record(
         )
 
 
+
+# def get_pending_jobs_for_date(
+#     business_date: str,
+# ) -> List[Dict[str, Any]]:
+#     query = """
+#     SELECT c.status, COUNT(1) AS cnt
+#     FROM c
+#     WHERE c.business_date = @business_date
+#     GROUP BY c.status
+#     """
+
+#     params = [
+#     {
+#         "name": "@business_date",
+#         "value": "2026-09-07"
+#     }
+#      ]
+
+#     for item in _container.query_items(
+#     query=query,
+#     parameters=params,
+#     enable_cross_partition_query=True
+#    ):
+#      print(item)
+#     return jobs
+
 def get_pending_jobs(
     business_date: str,
 ) -> List[Dict[str, Any]]:
@@ -242,14 +273,41 @@ def get_pending_jobs(
         },
     ]
 
+    # Cross-partition: don't assume the container's partition key is /business_date,
+    # otherwise a mismatch silently returns zero rows even when matching docs exist.
     return list(
         _container.query_items(
             query=query,
             parameters=parameters,
-            partition_key=business_date,
+            enable_cross_partition_query=True,
         )
     )
 
+
+def get_pending_jobs1(    business_date: str,
+) -> List[Dict[str, Any]]:
+    query = """
+      SELECT c.id,
+       c.business_date,
+       c.status,
+       c.record_type,
+       c.attempt_count
+       FROM c
+       """
+
+    jobs = list(
+    _container.query_items(
+        query=query,
+        enable_cross_partition_query=True
+    )
+)
+
+    print(f"Found {len(jobs)} total records")
+
+    for job in jobs:
+       print(job)
+
+    return jobs
 
 def create_batch_lock(
     business_date: str,
@@ -311,7 +369,7 @@ def mark_job_processing(
         item=job["id"],
         body=job,
         etag=job.get("_etag"),
-        match_condition="IfNotModified",
+        match_condition=MatchConditions.IfNotModified,
     )
 
 
@@ -338,7 +396,7 @@ def mark_job_completed(
         item=latest_job["id"],
         body=latest_job,
         etag=latest_job.get("_etag"),
-        match_condition="IfNotModified",
+        match_condition=MatchConditions.IfNotModified,
     )
 
 
@@ -360,7 +418,7 @@ def mark_job_failed(
             item=latest_job["id"],
             body=latest_job,
             etag=latest_job.get("_etag"),
-            match_condition="IfNotModified",
+            match_condition=MatchConditions.IfNotModified,
         )
 
     except Exception:
@@ -426,9 +484,6 @@ RECORD_COLUMNS = {
         "follow_up_date",
         "next_action",
         "created_at",
-        "result_description",
-        "result_code",
-         "result_timestamp"
     ],
     "soa": [
         "call_id",
@@ -440,6 +495,35 @@ RECORD_COLUMNS = {
         "status",
         "created_at",
     ],
+    "special_notes": [
+        "Organization ID",
+        "Customer #",
+        "Bill To #",
+        "Note text",
+        "Note Date",
+        "Note Entered By",
+        "Special Instruction Note",
+    ],
+    "document_copy": [
+        "Bill To # - Account",
+        "Document #",
+        "Transaction Balance Due",
+        "Contact Email Address",
+        "Customer #",
+    ],
+    "invoice_copy_single": [
+        "Invoice",
+        "Email",
+        "Status",
+    ],
+}
+
+# Only needed where a file_label's columns don't match the payload's own keys.
+FIELD_ALIASES = {
+    "invoice_copy_single": {
+        "Invoice": "Document #",
+        "Email": "Contact Email Address",
+    },
 }
 
 
@@ -447,8 +531,11 @@ def build_delimited_file(
     record_type: str,
     jobs: List[Dict[str, Any]],
     business_date: str,
+    file_label: Optional[str] = None,
 ) -> str:
-    if record_type not in RECORD_COLUMNS:
+    columns_key = file_label if file_label in RECORD_COLUMNS else record_type
+
+    if columns_key not in RECORD_COLUMNS:
         raise ValueError(
             f"No column definition found for record type: {record_type}"
         )
@@ -458,7 +545,7 @@ def build_delimited_file(
     ).strftime("%Y%m%d_%H%M%S")
 
     file_date = business_date.replace("-", "")
-    prefix = FILE_PREFIXES[record_type]
+    prefix = FILE_PREFIXES[file_label or record_type]
     filename = f"{prefix}_{file_date}.csv"
 
     output_path = os.path.join(
@@ -476,7 +563,8 @@ def build_delimited_file(
         ]
     )
 
-    columns = RECORD_COLUMNS[record_type]
+    columns = RECORD_COLUMNS[columns_key]
+    field_aliases = FIELD_ALIASES.get(file_label, {})
 
     with open(
         output_path,
@@ -501,7 +589,7 @@ def build_delimited_file(
             payload = job.get("payload") or {}
 
             values = [
-                sanitize_value(payload.get(column, ""))
+                sanitize_value(payload.get(field_aliases.get(column, column), ""))
                 for column in columns
             ]
 
@@ -524,9 +612,17 @@ def build_excel_file(
     record_type: str,
     jobs: List[Dict[str, Any]],
     business_date: str,
+    file_label: Optional[str] = None,
 ) -> str:
+    columns_key = file_label if file_label in RECORD_COLUMNS else record_type
+
+    if columns_key not in RECORD_COLUMNS:
+        raise ValueError(
+            f"No column definition found for record type: {record_type}"
+        )
+
     file_date = business_date.replace("-", "")
-    prefix = FILE_PREFIXES[record_type]
+    prefix = FILE_PREFIXES[file_label or record_type]
     filename = f"{prefix}_{file_date}.xlsx"
 
     output_path = os.path.join(
@@ -534,17 +630,28 @@ def build_excel_file(
         filename,
     )
 
+    columns = RECORD_COLUMNS[columns_key]
+    field_aliases = FIELD_ALIASES.get(file_label, {})
+
     rows = [
-        job.get("payload") or {}
+        {
+            column: sanitize_value((job.get("payload") or {}).get(field_aliases.get(column, column), ""))
+            for column in columns
+        }
         for job in jobs
+        if job.get("record_type") == record_type
     ]
 
-    dataframe = pd.DataFrame(rows)
-
-    dataframe.to_excel(
+    pd.DataFrame(rows, columns=columns).to_excel(
         output_path,
         index=False,
         engine="openpyxl",
+    )
+
+    logger.info(
+        "Generated file record_type=%s path=%s",
+        record_type,
+        output_path,
     )
 
     return output_path
@@ -553,13 +660,14 @@ def build_excel_file(
 def upload_batch_file(
     file_path: str,
     business_date: str,
+    output_folder: Optional[str] = None,
 ) -> Any:
     file_name = os.path.basename(file_path)
 
     date_path = business_date.replace("-", "/")
 
     production_folder = (
-        f"{SHAREPOINT_PRODUCTION_FOLDER}/{date_path}"
+        f"{output_folder or SHAREPOINT_PRODUCTION_FOLDER}/{date_path}"
     )
 
     result = upload_file_to_sharepoint(
@@ -585,10 +693,13 @@ def process_record_type(
     record_type: str,
     jobs: List[Dict[str, Any]],
     business_date: str,
+    file_label: Optional[str] = None,
+    output_folder: Optional[str] = None,
+    file_format: str = "csv",
 ) -> Dict[str, Any]:
     if not jobs:
         return {
-            "record_type": record_type,
+            "record_type": file_label or record_type,
             "job_count": 0,
             "status": "skipped",
         }
@@ -600,22 +711,19 @@ def process_record_type(
             mark_job_processing(job)
             processing_jobs.append(job)
 
-        if record_type in CSV_RECORD_TYPES:
-            generated_file = build_delimited_file(
-                record_type,
-                processing_jobs,
-                business_date,
-            )
-        else:
-            generated_file = build_excel_file(
-                record_type,
-                processing_jobs,
-                business_date,
-            )
+        build_file = build_excel_file if file_format == "excel" else build_delimited_file
+
+        generated_file = build_file(
+            record_type,
+            processing_jobs,
+            business_date,
+            file_label=file_label,
+        )
 
         upload_result = upload_batch_file(
             generated_file,
             business_date,
+            output_folder=output_folder,
         )
 
         file_name = os.path.basename(generated_file)
@@ -636,7 +744,7 @@ def process_record_type(
             )
 
         return {
-            "record_type": record_type,
+            "record_type": file_label or record_type,
             "job_count": len(processing_jobs),
             "status": "completed",
             "file_name": file_name,
@@ -655,17 +763,166 @@ def process_record_type(
             )
 
         return {
-            "record_type": record_type,
+            "record_type": file_label or record_type,
             "job_count": len(processing_jobs),
             "status": "failed",
             "error": str(exc),
         }
 
 
+def process_document_copy_jobs(
+    jobs: List[Dict[str, Any]],
+    business_date: str,
+    output_paths: Dict[str, str],
+    output_formats: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Invoices are split into a single-invoice file and a multi-invoice file,
+    each uploaded to its own SharePoint path, based on how many document_copy
+    jobs share the same call_id.
+
+    output_formats picks "csv" (default) or "excel" per label, e.g.
+    {"invoice_copy_single": "excel", "invoice_copy_multiple": "csv"}.
+    """
+
+    output_formats = output_formats or {}
+
+    jobs_by_call = defaultdict(list)
+
+    for job in jobs:
+        jobs_by_call[job.get("call_id", "")].append(job)
+
+    single_invoice_jobs = []
+    multi_invoice_jobs = []
+
+    for call_jobs in jobs_by_call.values():
+        if len(call_jobs) == 1:
+            single_invoice_jobs.extend(call_jobs)
+        else:
+            multi_invoice_jobs.extend(call_jobs)
+
+    results = []
+
+    if single_invoice_jobs:
+        results.append(
+            process_record_type(
+                "document_copy",
+                single_invoice_jobs,
+                business_date,
+                file_label="invoice_copy_single",
+                output_folder=output_paths.get(
+                    "invoice_copy_single",
+                    DEFAULT_OUTPUT_FOLDERS["invoice_copy_single"],
+                ),
+                file_format=output_formats.get("invoice_copy_single", "csv"),
+            )
+        )
+
+    if multi_invoice_jobs:
+        results.append(
+            process_record_type(
+                "document_copy",
+                multi_invoice_jobs,
+                business_date,
+                file_label="invoice_copy_multiple",
+                output_folder=output_paths.get(
+                    "invoice_copy_multiple",
+                    DEFAULT_OUTPUT_FOLDERS["invoice_copy_multiple"],
+                ),
+                file_format=output_formats.get("invoice_copy_multiple", "csv"),
+            )
+        )
+
+    return results
+
+
+def debug_jobs_for_date(business_date: str) -> None:
+    query = """
+        SELECT
+            c.id,
+            c.business_date,
+            c.status,
+            c.record_type,
+            c.attempt_count
+        FROM c
+        WHERE c.business_date = @business_date
+    """
+
+    parameters = [
+        {
+            "name": "@business_date",
+            "value": business_date,
+        }
+    ]
+
+    jobs = list(
+        _container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True,
+        )
+    )
+
+    print(f"Found {len(jobs)} total records for {business_date}")
+
+    for job in jobs:
+        print(
+            "id=", job.get("id"),
+            "status=", repr(job.get("status")),
+            "record_type=", job.get("record_type"),
+            "attempt_count=", repr(job.get("attempt_count")),
+        )
+
+def get_total_outbound_count(
+    business_date: str,
+) -> int:
+    query = """
+        SELECT VALUE COUNT(1)
+        FROM c
+        WHERE c.business_date = @business_date
+          AND c.status = "completed"
+          AND IS_DEFINED(c.batch_file_name)
+          AND c.batch_file_name != ""
+    """
+
+    parameters = [
+        {
+            "name": "@business_date",
+            "value": business_date,
+        }
+    ]
+
+    results = list(
+        _container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True,
+        )
+    )
+
+    total_records = int(results[0]) if results else 0
+
+    print(
+        f"Total records sent to outbound "
+        f"for {business_date}: {total_records}"
+    )
+
+    return total_records
+
 def process_daily_rpa_batch(
     business_date: Optional[str] = None,
+    output_paths: Optional[Dict[str, str]] = None,
+    output_formats: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
+    """
+    output_paths lets a caller override the default SharePoint folder per
+    record type, e.g. {"contact": "...", "invoice_copy_single": "..."}.
+
+    output_formats lets a caller pick "csv" or "excel" for the invoice files,
+    e.g. {"invoice_copy_single": "excel", "invoice_copy_multiple": "csv"}.
+    """
     selected_date = business_date or get_business_date()
+    output_paths = output_paths or {}
 
     if not create_batch_lock(selected_date):
         return {
@@ -694,10 +951,22 @@ def process_daily_rpa_batch(
         results = []
 
         for record_type, jobs in grouped_jobs.items():
+            if record_type == "document_copy":
+                results.extend(
+                    process_document_copy_jobs(
+                        jobs,
+                        selected_date,
+                        output_paths,
+                        output_formats,
+                    )
+                )
+                continue
+
             result = process_record_type(
                 record_type,
                 jobs,
                 selected_date,
+                output_folder=output_paths.get(record_type),
             )
             results.append(result)
 
@@ -722,3 +991,36 @@ def process_daily_rpa_batch(
 
     finally:
        delete_batch_lock(selected_date)
+
+
+
+if __name__ == "__main__":
+    partition_key_paths = (_container.read().get("partitionKey") or {}).get("paths")
+    print("Container partition key path:", partition_key_paths)
+
+    # business_date = get_business_date()
+    business_date="2026-09-09"
+    # jobs = get_pending_jobs(business_date)
+    # jobs =get_pending_jobs(business_date)
+    jobs=debug_jobs_for_date(business_date)
+    # jobs1=get_outbound_sent_count(business_date)
+    summary = get_total_outbound_count(business_date)
+    print("\nFinal summary:")
+    print(json.dumps(summary, indent=2))
+    # print(jobs)
+    # print(jobs1)
+    # print(f"Found {len(jobs)} jobs for business_date={business_date}")
+   
+    # for index, job in enumerate(jobs, start=1):
+    #     print(f"\nJob {index}")
+    #     print("Record type:", job.get("record_type"))
+    #     print("Payload:", json.dumps(job.get("payload") or {}, indent=2, ensure_ascii=False))
+    # for job in jobs[:3]:
+    #    print("\nID:", job["id"])
+    #    print(job.keys())
+    #    print("Keys:", list(job.keys()))
+
+    # if "payload" in job:
+    #     print("Payload Keys:", list((job["payload"] or {}).keys()))
+    #     print("Payload:", job["payload"])
+

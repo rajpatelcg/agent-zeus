@@ -3,10 +3,17 @@ from typing import Dict, Any
 from fastapi import APIRouter, WebSocket, Form, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
 from twilio.rest import Client
-from azure_service_bus.events import call_events
+import asyncio
+# from azure_service_bus.events import call_events
+from app.caller_features.dtmf import resolve_extension_digits
 import logging
 logger = logging.getLogger("endpoints")
 import os
+import httpx
+import logging
+import os
+import secrets
+from fastapi import Header, HTTPException
 from app.config.src import (
     WEBHOOK_URL, 
     TWILIO_CALLBACK_EVENTS, 
@@ -20,14 +27,28 @@ from app.caller_features.call_report import report_call_result, notify_agent_orc
 from app.caller_features.audit_manager import fire_and_forget_log
 from caller import handle_voice_agent
 from app.caller_features.conversation_state_store import ConversationStateStore
-
+from app.caller_features.rpa import (
+    process_daily_rpa_batch,
+)
 
 AGENT_ID = os.getenv("AGENT_ID")
 
 router = APIRouter()
+BATCH_TRIGGER_SECRET = os.getenv(
+
+"BATCH_TRIGGER_SECRET",
 
 
 
+)
+
+async def run_scheduled_batch() -> Dict[str, Any]:
+
+  return await asyncio.to_thread(
+
+  process_daily_rpa_batch
+
+)
 @router.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -70,11 +91,61 @@ async def get_audio_playback(call_id: str):
     return RedirectResponse(sas_url)
 
 
+@router.post(
+    "/v1/rpa/run-batch",
+    tags=["rpa"],
+)
+async def run_rpa_batch(
+    x_trigger_secret: str = Header(
+        default="",
+        alias="x-trigger-secret",
+    ),
+) -> Dict[str, Any]:
+    """
+    Scheduled endpoint invoked by Azure Logic Apps.
+    """
+
+    if not BATCH_TRIGGER_SECRET:
+        logger.error(
+            "BATCH_TRIGGER_SECRET is not configured"
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Batch trigger secret is not configured",
+        )
+
+    if not secrets.compare_digest(
+        x_trigger_secret,
+        BATCH_TRIGGER_SECRET,
+    ):
+        logger.warning(
+            "Unauthorized scheduled batch request"
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+        )
+
+    try:
+        result = await run_scheduled_batch()
+
+        return {
+            "status": "ok",
+            "business_date": result.get("business_date"),
+            "processed": result,
+        }
+
+    except Exception as exc:
+        logger.exception(
+            "Scheduled RPA batch execution failed"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Scheduled RPA batch execution failed",
+        ) from exc
 
 
-import httpx
-import logging
-import os
 
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATION_SERVICE_URL")
 AGENT_ID = os.getenv("AGENT_ID")
@@ -121,12 +192,28 @@ async def initiate_outbound_call(request: Dict[str, Any]):
 
     client = Client(account_sid, auth_token)
     user_phone = request.get("phone_number")
+    extension = request.get("extension")
+
     if not user_phone:
         fire_and_forget_log(request, "Pre‑Call Workflow Initialization", "callhandler_e001", False, "Pre‑call workflow could not be initialized due to missing or invalid inputs")
         return {"error": "phone_number is required"}
 
     fire_and_forget_log(request, "Pre‑Call Workflow Initialization", "callhandler_e001", True)
+    if extension and str(extension).strip():
+        ext_clean = resolve_extension_digits(extension)
+        if not ext_clean:
+            fire_and_forget_log(
+                request,
+                "Pre‑Call Workflow Initialization",
+                "callhandler_e001",
+                False,
+                "Pre-call workflow could not be initialized due to invalid extension format",
+            )
+            return {"error": "extension must resolve to exactly 4 digits"}
 
+        request["extension"] = ext_clean
+
+    fire_and_forget_log(request, "Pre‑Call Workflow Initialization", "callhandler_e001", True)
     try:
         call = client.calls.create(
             from_=TWILIO_PHONE_NUMBER,
@@ -202,9 +289,9 @@ async def twilio_status_callback(
             failure_message=msg,
         )
 
-        event = call_events.pop(CallSid, None)
-        if event:
-            event.set()
+        # event = call_events.pop(CallSid, None)
+        # if event:
+        #     event.set()
             
         notify_agent_orchestration_service(user_data.get("call_id", " "))
             
@@ -228,9 +315,9 @@ async def twilio_status_callback(
         # handle_voice_agent() already reports the final outcome
         # using telemetry, transcript, idle detection, etc.
 
-        event = call_events.pop(CallSid, None)
-        if event:
-            event.set()
+        # event = call_events.pop(CallSid, None)
+        # if event:
+        #     event.set()
 
     return {"status": "received"}
 
